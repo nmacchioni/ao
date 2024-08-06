@@ -153,18 +153,41 @@ def _unwrap_affine_fake_quantized_tensor(t: torch.Tensor):
         AffineFakeQuantizedTensor,
     )
     assert isinstance(t, AffineFakeQuantizedTensor)
-    return t.float_data
+    return t.original_tensor
 
 def _is_linear_with_fq_weight(mod: torch.nn.Module, *args):
     """
     Return whether this is a nn.Linear module with `AffineFakeQuantizeTensor` weights.
     """
     # avoid circular dependencies
+    from torchao.quantization.linear_activation_quantized_tensor import (
+        LinearActivationQuantizedTensor,
+    )
     from torchao.quantization.prototype.qat.affine_fake_quantized_tensor import (
         AffineFakeQuantizedTensor,
     )
-    return (
-        isinstance(mod, torch.nn.Linear)
-        and hasattr(mod, "weight")
-        and isinstance(mod.weight, AffineFakeQuantizedTensor)
+    if not isinstance(mod, torch.nn.Linear) or not hasattr(mod, "weight"):
+        return False
+    weight = mod.weight
+    if isinstance(weight, LinearActivationQuantizedTensor):
+        weight = weight.original_weight_tensor
+    return isinstance(weight, AffineFakeQuantizedTensor)
+
+def _enable_fake_quant(mod: torch.nn.Module, enable: bool):
+    """
+    Enable or disable fake quantization in the activations and weights of a `nn.Linear` module.
+    """
+    from torchao.quantization.linear_activation_quantized_tensor import (
+        LinearActivationQuantizedTensor,
     )
+    from torchao.quantization.prototype.qat.affine_fake_quantized_tensor import (
+        AffineFakeQuantizedTensor,
+    )
+    if not _is_linear_with_fq_weight(mod):
+        return
+    weight = mod.weight
+    if isinstance(weight, LinearActivationQuantizedTensor):
+        weight.input_quant_func_enabled = enable
+        weight = weight.original_weight_tensor
+    assert isinstance(weight, AffineFakeQuantizedTensor)
+    weight.fake_quant_enabled = enable

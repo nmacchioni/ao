@@ -12,6 +12,12 @@ import unittest
 
 import torch
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from torchao.quantization.linear_activation_quantized_tensor import (
+    LinearActivationQuantizedTensor,
+)
+from torchao.quantization.prototype.qat.affine_fake_quantized_tensor import (
+    AffineFakeQuantizedTensor,
+)
 from torchao.quantization.prototype.qat.utils import (
     _choose_qparams_per_token_asymmetric,
     _fake_quantize_per_channel_group,
@@ -252,6 +258,13 @@ class TestQAT(unittest.TestCase):
             enable_8da4w_fake_quant,
         )
 
+        def assert_fake_quant_enabled(m: torch.nn.Linear, enabled: bool):
+            assert isinstance(m.weight, LinearActivationQuantizedTensor)
+            self.assertEqual(m.weight.input_quant_func_enabled, enabled)
+            weight = m.weight.original_weight_tensor
+            self.assertTrue(isinstance(weight, AffineFakeQuantizedTensor))
+            self.assertEqual(weight.fake_quant_enabled, enabled)
+
         group_size = 16
         torch.manual_seed(self.SEED)
         m = M()
@@ -260,9 +273,9 @@ class TestQAT(unittest.TestCase):
         quantizer = Int8DynActInt4WeightQATQuantizer(groupsize=group_size)
         qat_model = quantizer.prepare(m)
         qat_model.apply(disable_8da4w_fake_quant)
-        self.assertFalse(qat_model.linear1._fake_quant_enabled)
-        self.assertFalse(qat_model.linear2._fake_quant_enabled)
-        self.assertFalse(qat_model.sub.linear._fake_quant_enabled)
+        assert_fake_quant_enabled(qat_model.linear1, enabled=False)
+        assert_fake_quant_enabled(qat_model.linear2, enabled=False)
+        assert_fake_quant_enabled(qat_model.sub.linear, enabled=False)
 
         # Disabled fake quant is just a normal linear
         m2.linear1.weight = qat_model.linear1.weight
@@ -277,9 +290,9 @@ class TestQAT(unittest.TestCase):
 
         # Renable fake quant
         qat_model.apply(enable_8da4w_fake_quant)
-        self.assertTrue(qat_model.linear1._fake_quant_enabled)
-        self.assertTrue(qat_model.linear2._fake_quant_enabled)
-        self.assertTrue(qat_model.sub.linear._fake_quant_enabled)
+        assert_fake_quant_enabled(qat_model.linear1, enabled=True)
+        assert_fake_quant_enabled(qat_model.linear2, enabled=True)
+        assert_fake_quant_enabled(qat_model.sub.linear, enabled=True)
 
         # Fake quant should be applied as normal
         quantizer2 = Int8DynActInt4WeightQATQuantizer(groupsize=group_size)
@@ -304,6 +317,11 @@ class TestQAT(unittest.TestCase):
             disable_8da4w_fake_quant,
         )
 
+        def get_qat_weight(qat_linear: torch.nn.Linear):
+            assert isinstance(qat_linear.weight, LinearActivationQuantizedTensor)
+            assert isinstance(qat_linear.weight.original_weight_tensor, AffineFakeQuantizedTensor)
+            return qat_linear.weight.original_weight_tensor.original_tensor
+
         group_size = 16
         torch.manual_seed(self.SEED)
         m = M()
@@ -311,9 +329,9 @@ class TestQAT(unittest.TestCase):
         quantizer = Int8DynActInt4WeightQATQuantizer(groupsize=group_size)
         qat_model = quantizer.prepare(m)
         qat_model.apply(disable_8da4w_fake_quant)
-        nn_model.linear1.weight = qat_model.linear1.weight
-        nn_model.linear2.weight = qat_model.linear2.weight
-        nn_model.sub.linear.weight = qat_model.sub.linear.weight
+        nn_model.linear1.weight = torch.nn.Parameter(get_qat_weight(qat_model.linear1))
+        nn_model.linear2.weight = torch.nn.Parameter(get_qat_weight(qat_model.linear2))
+        nn_model.sub.linear.weight = torch.nn.Parameter(get_qat_weight(qat_model.sub.linear))
 
         # Simulate training for both models
         optimizer1 = torch.optim.SGD(nn_model.parameters(), lr=0.001, momentum=0.9, weight_decay=1e-5)
@@ -335,9 +353,9 @@ class TestQAT(unittest.TestCase):
         optimizer2.step()
 
         # After 1 training step, weights should match exactly
-        torch.testing.assert_close(nn_model.linear1.weight, qat_model.linear1.weight, atol=0, rtol=0)
-        torch.testing.assert_close(nn_model.linear2.weight, qat_model.linear2.weight, atol=0, rtol=0)
-        torch.testing.assert_close(nn_model.sub.linear.weight, qat_model.sub.linear.weight, atol=0, rtol=0)
+        torch.testing.assert_close(nn_model.linear1.weight, get_qat_weight(qat_model.linear1), atol=0, rtol=0)
+        torch.testing.assert_close(nn_model.linear2.weight, get_qat_weight(qat_model.linear2), atol=0, rtol=0)
+        torch.testing.assert_close(nn_model.sub.linear.weight, get_qat_weight(qat_model.sub.linear), atol=0, rtol=0)
 
     @unittest.skipIf(not TORCH_VERSION_AFTER_2_4, "skipping when torch version is 2.4 or lower")
     def test_qat_generic_fake_quantize(self):

@@ -40,6 +40,7 @@ from torchao.quantization.utils import (
 from .affine_fake_quantized_tensor import to_affine_fake_quantized
 from .utils import (
     _choose_qparams_per_token_asymmetric,
+    _enable_fake_quant,
     _fake_quantize_per_channel_group,
     _fake_quantize_per_token,
     _is_linear_with_fq_weight,
@@ -230,17 +231,15 @@ class Int8DynActInt4WeightQATLinear(torch.nn.Linear):
 
 def enable_8da4w_fake_quant(mod: torch.nn.Module):
     """
-    Enable fake quantization for `Int8DynActInt4WeightQATLinear`.
+    Enable fake quantization for int8 dynamic activations + int4 weight.
     """
-    if isinstance(mod, Int8DynActInt4WeightQATLinear):
-        mod.enable_fake_quant()
+    _enable_fake_quant(mod, enable=True)
 
 def disable_8da4w_fake_quant(mod: torch.nn.Module):
     """
-    Disable fake quantization for `Int8DynActInt4WeightQATLinear`.
+    Disable fake quantization for int8 dynamic activations + int4 weight.
     """
-    if isinstance(mod, Int8DynActInt4WeightQATLinear):
-        mod.disable_fake_quant()
+    _enable_fake_quant(mod, enable=False)
 
 
 # ==================
@@ -390,14 +389,12 @@ class Int4WeightOnlyQATLinear(torch.nn.Linear):
 
 def enable_4w_fake_quant(mod: torch.nn.Module):
     """
-    Enable fake quantization for `Int4WeightOnlyQATLinear`.
+    Enable fake quantization for int4 weight only.
     """
-    if isinstance(mod, Int4WeightOnlyQATLinear):
-        mod.enable_fake_quant()
+    _enable_fake_quant(mod, enable=True)
 
 def disable_4w_fake_quant(mod: torch.nn.Module):
     """
-    Disable fake quantization for `Int4WeightOnlyQATLinear`.
+    Disable fake quantization for int4 weight only.
     """
-    if isinstance(mod, Int4WeightOnlyQATLinear):
-        mod.disable_fake_quant()
+    _enable_fake_quant(mod, enable=False)

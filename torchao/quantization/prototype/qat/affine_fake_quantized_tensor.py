@@ -17,6 +17,42 @@ from .utils import _GenericFakeQuantize
 
 aten = torch.ops.aten
 
+
+class _FromTorchTensor(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        original_tensor: torch.Tensor,
+        apply_fake_quant_fn: Callable,
+        fake_quant_enabled: bool,
+    ) -> "AffineFakeQuantizedTensor":
+        return AffineFakeQuantizedTensor(
+            original_tensor,
+            apply_fake_quant_fn,
+            fake_quant_enabled,
+        )
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+        return _ToTorchTensor.apply(grad_output), None, None
+
+class _ToTorchTensor(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, fq_tensor: "AffineFakeQuantizedTensor") -> torch.Tensor:
+        ctx.apply_fake_quant_fn = fq_tensor.apply_fake_quant_fn
+        ctx.fake_quant_enabled = fq_tensor.fake_quant_enabled
+        return fq_tensor.original_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> "AffineFakeQuantizedTensor":
+        apply_fake_quant_fn = ctx.apply_fake_quant_fn
+        fake_quant_enabled = ctx.fake_quant_enabled
+        return AffineFakeQuantizedTensor(
+            grad_output,
+            apply_fake_quant_fn,
+            fake_quant_enabled,
+        )
+
 class AffineFakeQuantizedTensor(torch.Tensor):
     """
     Affine fake quantized tensor subclass. Affine quantization means we quantize the floating point tensor
@@ -54,7 +90,7 @@ class AffineFakeQuantizedTensor(torch.Tensor):
         fake_quant_enabled: bool = True,
     ):
         # TODO: original_tensor is not getting updated!
-        original_tensor.requires_grad_(self.requires_grad)
+        original_tensor.requires_grad_(True)
         self.original_tensor = original_tensor
         self.apply_fake_quant_fn = apply_fake_quant_fn
         self.fake_quant_enabled = fake_quant_enabled
@@ -114,7 +150,12 @@ class AffineFakeQuantizedTensor(torch.Tensor):
                 zero_point_domain,
             )
             return fq
-        return cls(input_float, apply_fake_quant_fn)
+        fake_quant_enabled = True
+        return _FromTorchTensor.apply(
+            input_float,
+            apply_fake_quant_fn,
+            fake_quant_enabled,
+        )
 
     def to_fake_quantized(self) -> torch.Tensor:
         return self.apply_fake_quant_fn(self.original_tensor)
